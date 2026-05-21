@@ -67,9 +67,10 @@ for offset in day_offsets:
     # THE WGS84 FIX: Swapped gdal_translate for gdalwarp and injected -t_srs EPSG:4326
    # THE WGS84 FIX: Explicitly declare the Source CRS (UTM 48S) and Target CRS (WGS84)
     # We removed capture_output=True and added check=True so errors don't hide silently!
+   # THE WGS84 FIX: Added -overwrite so GDAL automatically replaces yesterday's files
     subprocess.run(
-        f"gdalwarp -s_srs EPSG:32748 -t_srs EPSG:4326 {raw_output} {final_cog_name} -co TILED=YES -co COMPRESS=DEFLATE", 
-        shell=True,
+        f"gdalwarp -overwrite -s_srs EPSG:32748 -t_srs EPSG:4326 {raw_output} {final_cog_name} -co TILED=YES -co COMPRESS=DEFLATE", 
+        shell=True, 
         check=True
     )
     
