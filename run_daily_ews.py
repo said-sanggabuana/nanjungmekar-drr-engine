@@ -61,12 +61,12 @@ for offset in day_offsets:
     wbt.greater_than("temp_raw_risk.tif", 0.0, "temp_mask.tif")
     wbt.multiply("temp_raw_risk.tif", "temp_mask.tif", raw_output)
     
-    # E. Convert to Cloud Optimized GeoTIFF (COG)
+    # E. Reproject to WGS84 and Convert to Cloud Optimized GeoTIFF (COG)
     final_cog_name = f"cog_flood_{date_str}_{offset_label}.tif"
     
-    # THE FIX: Single string, no brackets, shell=True
+    # THE WGS84 FIX: Swapped gdal_translate for gdalwarp and injected -t_srs EPSG:4326
     subprocess.run(
-        f"gdal_translate {raw_output} {final_cog_name} -co TILED=YES -co COMPRESS=DEFLATE", 
+        f"gdalwarp -t_srs EPSG:4326 {raw_output} {final_cog_name} -co TILED=YES -co COMPRESS=DEFLATE", 
         shell=True, 
         capture_output=True
     )
@@ -76,4 +76,4 @@ for offset in day_offsets:
         if os.path.exists(f): 
             os.remove(f)
 
-print("\nSUCCESS: 29 Cloud Optimized GeoTIFFs have been generated.")
+print("\nSUCCESS: 29 Cloud Optimized GeoTIFFs have been generated in WGS84.")
