@@ -30,7 +30,9 @@ def fetch_mock_forecast(reach_id, day_offset):
 # ==========================================
 # 3. THE TEMPORAL LOOP (-14 to +14 days)
 # ==========================================
-today = datetime.date.today()
+# Force the engine to use WIB (UTC+7) so it always matches the Indonesian web dashboard
+wib_timezone = datetime.timezone(datetime.timedelta(hours=7))
+today = datetime.datetime.now(wib_timezone).date()
 day_offsets = list(range(-14, 15)) 
 
 print("Executing spatial math for 29 days... Grab a coffee.")
