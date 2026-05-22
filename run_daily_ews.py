@@ -1,52 +1,77 @@
 import whitebox
 import os
 import datetime
-import random
 import subprocess
+import requests # NEW: For fetching live data
 
-print("--- INITIATING 28-DAY AUTOMATED EWS ENGINE ---")
+print("--- INITIATING 28-DAY AUTOMATED EWS ENGINE (LIVE DATA MODE) ---")
 
 # ==========================================
 # 1. CONFIGURATION
 # ==========================================
-catchment_mapping = {
-    510123511: 1,  # Cikeruh Reach -> Subbasin 1
-    510116631: 2   # Cimande Reach -> Subbasin 2
-}
-
 wbt = whitebox.WhiteboxTools()
 wbt.set_working_dir(os.getcwd())
-wbt.verbose = False  # Turned off so the terminal doesn't get flooded
+wbt.verbose = False 
+
+# Force the engine to use WIB (UTC+7)
+wib_timezone = datetime.timezone(datetime.timedelta(hours=7))
+today = datetime.datetime.now(wib_timezone).date()
 
 # ==========================================
-# 2. MOCK DATA FETCH (Temporary for Phase 1)
+# 2. FETCH REAL-TIME METEOROLOGICAL DATA
 # ==========================================
-def fetch_mock_forecast(reach_id, day_offset):
-    """Simulates a flood wave peaking at Day 0 (Today)."""
-    base_flow = 85.2 if reach_id == 510123511 else 120.5
-    surge = (15 - abs(day_offset)) * (1.5 if reach_id == 510123511 else 2.0)
-    return base_flow + surge + random.uniform(-2, 2)
+def fetch_live_rainfall():
+    """
+    Pulls 14 days past and 14 days future rainfall data (in mm) for the Cicalengka basin.
+    """
+    print("Fetching live atmospheric data for Cicalengka...")
+    LAT = -6.97
+    LON = 107.82
+    
+    # Open-Meteo API: Free, no auth required, perfectly matches our -14 to +14 timeline
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&daily=precipitation_sum&past_days=14&forecast_days=15&timezone=Asia%2FJakarta"
+    
+    response = requests.get(url)
+    if response.status_code != 200:
+        raise Exception(f"API Fetch Failed: {response.status_code}")
+        
+    data = response.json()
+    dates = data['daily']['time']
+    rain_sums = data['daily']['precipitation_sum']
+    
+    # Create a dictionary mapping the date string (YYYY-MM-DD) to the rainfall in mm
+    # If a value is None, default it to 0.0
+    return {date: (rain if rain is not None else 0.0) for date, rain in zip(dates, rain_sums)}
+
+# Execute the fetch
+rainfall_data = fetch_live_rainfall()
 
 # ==========================================
 # 3. THE TEMPORAL LOOP (-14 to +14 days)
 # ==========================================
-# Force the engine to use WIB (UTC+7) so it always matches the Indonesian web dashboard
-wib_timezone = datetime.timezone(datetime.timedelta(hours=7))
-today = datetime.datetime.now(wib_timezone).date()
 day_offsets = list(range(-14, 15)) 
 
-print("Executing spatial math for 29 days... Grab a coffee.")
+print("Executing spatial math for 29 days based on live telemetry...")
 
 for offset in day_offsets:
     target_date = today + datetime.timedelta(days=offset)
-    date_str = target_date.strftime("%Y%m%d")
+    
+    # Format dates to match the API key (YYYY-MM-DD) and our file outputs (YYYYMMDD)
+    api_date_key = target_date.strftime("%Y-%m-%d")
+    file_date_str = target_date.strftime("%Y%m%d")
+    
     offset_label = f"minus{abs(offset)}" if offset < 0 else f"plus{offset}" if offset > 0 else "today"
     
-    print(f" -> Processing: Day {offset} ({date_str})")
+    # Extract today's actual rainfall from the API payload
+    daily_rain_mm = rainfall_data.get(api_date_key, 0.0)
+    
+    print(f" -> Processing: Day {offset} ({file_date_str}) | Live Rain: {daily_rain_mm} mm")
 
-    # A. Get Data & Calibrate Rating Curve
-    flow_sub1 = fetch_mock_forecast(510123511, offset)
-    flow_sub2 = fetch_mock_forecast(510116631, offset)
+    # A. Calibrate Rating Curve using REAL Rainfall
+    # Base flow (dry day) + (Rainfall * Runoff Multiplier)
+    # You will tweak these multipliers based on how the basin actually reacts today!
+    flow_sub1 = 85.2 + (daily_rain_mm * 2.5)  # Cikeruh Reach
+    flow_sub2 = 120.5 + (daily_rain_mm * 3.0) # Cimande Reach
     
     stage_sub1 = flow_sub1 * 0.060 
     stage_sub2 = flow_sub2 * 0.025
@@ -59,26 +84,22 @@ for offset in day_offsets:
     wbt.subtract("temp_levels.tif", "5_hand.tif", "temp_raw_risk.tif")
     
     # D. Masking
-    raw_output = f"raw_flood_{date_str}_{offset_label}.tif"
+    raw_output = f"raw_flood_{file_date_str}_{offset_label}.tif"
     wbt.greater_than("temp_raw_risk.tif", 0.0, "temp_mask.tif")
     wbt.multiply("temp_raw_risk.tif", "temp_mask.tif", raw_output)
     
-    # E. Reproject to WGS84 and Convert to Cloud Optimized GeoTIFF (COG)
-    final_cog_name = f"cog_flood_{date_str}_{offset_label}.tif"
+    # E. Reproject to WGS84 and Convert to COG
+    final_cog_name = f"cog_flood_{file_date_str}_{offset_label}.tif"
     
-    # THE WGS84 FIX: Swapped gdal_translate for gdalwarp and injected -t_srs EPSG:4326
-   # THE WGS84 FIX: Explicitly declare the Source CRS (UTM 48S) and Target CRS (WGS84)
-    # We removed capture_output=True and added check=True so errors don't hide silently!
-   # THE WGS84 FIX: Added -overwrite so GDAL automatically replaces yesterday's files
     subprocess.run(
         f"gdalwarp -overwrite -s_srs EPSG:32748 -t_srs EPSG:4326 {raw_output} {final_cog_name} -co TILED=YES -co COMPRESS=DEFLATE", 
         shell=True, 
         check=True
     )
     
-    # F. Clean up all temporary files for this day
+    # F. Clean up temporary files
     for f in ["temp_levels.tif", "temp_raw_risk.tif", "temp_mask.tif", raw_output]:
         if os.path.exists(f): 
             os.remove(f)
 
-print("\nSUCCESS: 29 Cloud Optimized GeoTIFFs have been generated in WGS84.")
+print("\nSUCCESS: Live telemetry processed. 29 Cloud Optimized GeoTIFFs generated.")
