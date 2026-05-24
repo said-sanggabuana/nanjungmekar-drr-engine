@@ -96,7 +96,9 @@ for offset in day_offsets:
     raw_output = f"raw_flood_{file_date_str}_{offset_label}.tif"
     wbt.greater_than("temp_raw_risk.tif", 0.0, "temp_mask.tif")
     wbt.multiply("temp_raw_risk.tif", "temp_mask.tif", raw_output)
-    
+    if not os.path.exists(raw_output):
+        print(f"    -> Basin is dry. Forcing empty baseline raster...")
+        wbt.multiply("7_catchments.tif", 0.0, raw_output)
     # E. Reproject to WGS84 and Convert to COG
     final_cog_name = f"cog_flood_{file_date_str}_{offset_label}.tif"
     
