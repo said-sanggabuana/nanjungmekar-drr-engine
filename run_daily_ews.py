@@ -70,14 +70,23 @@ for offset in day_offsets:
     # A. Calibrate Rating Curve using REAL Rainfall
     # Base flow (dry day) + (Rainfall * Runoff Multiplier)
     # You will tweak these multipliers based on how the basin actually reacts today!
+    base_flow_sub1 = 20.0
+    base_flow_sub2 = 30.0
+
     flow_sub1 = 85.2 + (daily_rain_mm * 2.5)  # Cikeruh Reach
     flow_sub2 = 120.5 + (daily_rain_mm * 3.0) # Cimande Reach
-    
-    stage_sub1 = flow_sub1 * 0.060 
-    stage_sub2 = flow_sub2 * 0.025
+
+    raw_stage_sub1 = flow_sub1 * 0.060
+    raw_stage_sub2 = flow_sub2 * 0.025
+
+    bank_capacity_sub1 = 1.2
+    bank_capacity_sub2 = 0.8
+
+    flood_stage_sub1 = max(0.0, raw_stage_sub1 - bank_capacity_sub1)
+    flood_stage_sub2 = max(0.0, raw_stage_sub2 - bank_capacity_sub2)
     
     # B. Float-Point Safe Reclass
-    reclass_string = f"{stage_sub1};0.9;1.1;{stage_sub2};1.9;2.1"
+    reclass_string = f"{flood_stage_sub1};0.9;1.1{flood_stage_sub2};1.9;2.1"
     
     # C. Run Spatial Physics
     wbt.reclass(i="7_catchments.tif", output="temp_levels.tif", reclass_vals=reclass_string)
